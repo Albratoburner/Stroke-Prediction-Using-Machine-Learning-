@@ -1,0 +1,459 @@
+---
+title: "Assign_code"
+author: "Safal Lohani"
+date: "2025-03-14"
+output: html_document
+---
+
+---
+title: "Assingment"
+author: "Safal Lohani"
+date: "2025-03-13"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+# Introduction
+
+Health is the most important asset for any human being. No amount of resources can be useful to humankind without having good health. With advancements in technology data driven approaches and statistical modeling have become essential to identify or to predict possible health issues and risks. With the use of these methods and techniques healthcare professionals can predict possible risks and provide timely solutions and medications to try and eliminate the risk.
+
+Stroke is a medical condition in which the a part of the brain is deprived of blood flow, which causes damags the brain tissue. Stroke can cause brain damage, physical disability or even death. Stroke is one of the leading causes of mortality through the world, due to this there is a need of usage of prevention strategies and regular research.
+
+**Problem Statement**
+
+Stroke is a serious medical condition that can lead to brain damage, physical disability, or even death. It causes about 6.5 million deaths every year. Survivors of stroke often suffer from long-term effects such as paralysis, vision loss, hearing issues, blood clots, coma, and many more. Due to the effects of stroke a person or their family may face multiple financial, mental, and physical burdens. Delayed Diagnosis of stroke or lack of awareness can lead to complicated future issues. Despite numerous advancements stroke prevention remains challenging because various factors such as age, diabetes level, lifestyle habits, and blood pressure levels need to be considered while making such a critical prediction.
+
+**Negative Impact of the Problem**
+
+Strokes do not just affect individuals but also families, the healthcare system, and the economy. A lot of people die from stroke every year. Even the survivors face various long-term conditions like mobility issues, hearing issues, vision loss, and many more. Financial burdens caused by treatment, recovery, rehabilitation, and care giving process can place significant strain on families and the healthcare system. Delays in diagnosis and lack of awareness can result in preventable deaths and disabilities.
+
+**Parties Affected**
+
+Stroke affects various people. Particularly it affects older adults, people who live an unhealthy lifestyle, and those individuals who have a pre-existing health condition. Strokes can also place emotional and financial burdens on the individual and family members. Stroke also affects the healthcare system as more resources need to be used to deal with the effects of stroke.
+
+**Benefit of Solving the Problem**
+
+Strokes are a serious medical condition. Timely identification and mitigation of stroke-related risk factors can change many lives for the better. Analysis of stroke-related data and development of a statistical model for stroke prediction can help in timely intervention, reducing the occurrence of stroke and the severity of its effects. This study aims to analyze stroke-related datasets to discover patterns and use statistical methods to provide valuable stroke-related insights to the healthcare system and various stakeholders which will lead to a better understanding and stroke awareness. This will ultimately result in enhanced prevention strategies, improved healthcare services, and reduced mortality rates.
+
+# Literature Review and Related Works
+
+
+
+
+```{r}
+library(tidyverse) 
+library(naniar) 
+library(skimr) 
+library(caret) 
+library(MLmetrics)
+library(imbalance) 
+library(gridExtra) 
+library(patchwork)
+library(xgboost)
+library(ggcorrplot)
+library(randomForest)
+library(rpart)
+
+```
+
+
+```{r}
+data <- read.csv("healthcare-dataset-stroke-data.csv")
+```
+
+
+```{r}
+skim(data)
+```
+```{r}
+categorical_vars <- names(data)[sapply(data, is.character)]
+for (var in categorical_vars) {
+  print(ggplot(data, aes_string(x = var)) +
+          geom_bar(fill='steelblue') +
+          ggtitle(paste("Distribution of", var)))
+}
+```
+```{r}
+library(reshape2)
+
+# Reshape data to long format
+data_long <- melt(data, id.vars = NULL, measure.vars = categorical_vars)
+
+# Create a combined plot using facet_wrap
+combined_plot <- ggplot(data_long, aes(x = value)) +
+  geom_bar(fill = 'steelblue') +
+  facet_wrap(~ variable, scales = "free_x", ncol = 3) + # Adjust ncol for the number of columns
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Distribution of Categorical Variables")
+
+# Print the combined plot
+print(combined_plot)
+```
+
+
+```{r}
+numerical_vars <- names(data)[sapply(data, is.numeric)]
+for (var in numerical_vars) {
+  print(ggplot(data, aes_string(x = var)) +
+          geom_histogram(fill='steelblue', bins=30, color='black') +
+          ggtitle(paste("Histogram of", var)))
+}
+
+```
+```{r}
+
+library(ggplot2)
+library(reshape2)
+
+# List of numerical variables
+numerical_vars <- names(data)[sapply(data, is.numeric)]
+
+# Reshape data to long format (only include numerical variables)
+data_long_numeric <- melt(data, id.vars = NULL, measure.vars = numerical_vars)
+
+# Create a combined plot using facet_wrap for numerical variables
+combined_numeric_plot <- ggplot(data_long_numeric, aes(x = value)) +
+  geom_histogram(fill = 'steelblue', bins = 30, color = 'black', alpha = 0.7) +
+  facet_wrap(~ variable, scales = "free_x", ncol = 3) +  # Adjust ncol to control number of columns
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Distribution of Numerical Variables")
+
+# Print the combined plot
+print(combined_numeric_plot)
+
+
+```
+
+Part Methods:
+```{r}
+miss_scan_count(data = data, search = list("N/A", "Unknown"))
+
+
+```
+```{r}
+data_clean <- data[data$bmi != "N/A", ]
+data_clean$bmi <- as.numeric(data_clean$bmi)  
+
+```
+```{r}
+data_clean <- data_clean %>%
+  mutate(age_group = cut(age, breaks = c(0, 20, 40, 60, 80, 100), 
+                         labels = c("0-20", "20-40", "40-60", "60-80", "80-100"),
+                         include.lowest = TRUE))
+
+# Find the most common smoking status for each age group
+mode_by_age_group <- data_clean %>%
+  filter(smoking_status != "Unknown") %>%
+  group_by(age_group, smoking_status) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  arrange(age_group, desc(count)) %>%
+  group_by(age_group) %>%
+  filter(row_number() == 1) %>%  # Select the most common smoking status
+  ungroup() %>%
+  select(age_group, smoking_status)
+
+# Merge mode information back into the dataset
+data_clean <- data_clean %>%
+  left_join(mode_by_age_group, by = "age_group", suffix = c("", "_mode")) %>%
+  mutate(smoking_status = ifelse(smoking_status == "Unknown", smoking_status_mode, smoking_status)) %>%
+  select(-smoking_status_mode)
+
+```
+```{r}
+ggplot(data_clean, aes(x = smoking_status, fill = smoking_status)) +
+  geom_bar() +
+  labs(title = "Distribution of Smoking Status",
+       x = "Smoking Status",
+       y = "Count") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") 
+```
+
+
+```{r}
+ggplot(data_clean, aes(x = age_group, fill = smoking_status)) +
+  geom_bar(position = "dodge") +  # Dodge separates bars by smoking_status
+  labs(title = "Smoking Status Distribution by Age Group",
+       x = "Age Group",
+       y = "Count",
+       fill = "Smoking Status") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2")
+```
+```{r}
+ggplot(data_clean, aes(y = avg_glucose_level)) +
+  geom_boxplot(fill = "steelblue", outlier.color = "red", outlier.shape = 16) +
+  labs(title = "Box Plot of Average Glucose Level",
+       y = "Glucose Level") +
+  theme_minimal()
+
+```
+```{r}
+ggplot(data_clean, aes(y = as.numeric(bmi))) +  # Ensure BMI is numeric
+  geom_boxplot(fill = "orange", outlier.color = "red", outlier.shape = 16) +
+  labs(title = "Box Plot of BMI",
+       y = "BMI") +
+  theme_minimal()
+```
+```{r}
+ggplot(data_clean, aes(x = avg_glucose_level, y = as.numeric(bmi), color = factor(stroke))) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Glucose vs BMI (Colored by Stroke)",
+       x = "Average Glucose Level",
+       y = "BMI",
+       color = "Stroke") +
+  theme_minimal()
+```
+```{r}
+ggplot(data_clean, aes(x = factor(hypertension), fill = factor(stroke))) +
+  geom_bar(position = "fill") +  # Stacked bar with proportions
+  labs(title = "Stroke Rate by Hypertension",
+       x = "Hypertension (0 = No, 1 = Yes)",
+       y = "Proportion",
+       fill = "Stroke") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(data_clean, aes(x = factor(heart_disease), fill = factor(stroke))) +
+  geom_bar(position = "fill") +
+  labs(title = "Stroke Rate by Heart Disease",
+       x = "Heart Disease (0 = No, 1 = Yes)",
+       y = "Proportion",
+       fill = "Stroke") +
+  theme_minimal()
+```
+```{r}
+ggplot(data_clean, aes(x = smoking_status, fill = factor(stroke))) +
+  geom_bar(position = "fill") +
+  labs(title = "Stroke Rate by Smoking Status",
+       x = "Smoking Status",
+       y = "Proportion",
+       fill = "Stroke") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+ggplot(data_clean, aes(x = ever_married, fill = factor(stroke))) +
+  geom_bar(position = "fill") +  
+  labs(title = "Stroke Proportion by Marital Status",
+       x = "Ever Married",
+       y = "Proportion",
+       fill = "Stroke") +
+  theme_minimal() +
+  scale_fill_manual(values = c("steelblue", "red"))
+```
+```{r}
+ggplot(data_clean, aes(x = work_type, fill = factor(stroke))) +
+  geom_bar(position = "fill") +  
+  labs(title = "Stroke Proportion by Work Type",
+       x = "Work Type",
+       y = "Proportion",
+       fill = "Stroke") +
+  theme_minimal() +
+  scale_fill_manual(values = c("steelblue", "red")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+
+```{r}
+data_numeric <- data_clean %>%
+  select(avg_glucose_level, bmi, hypertension, heart_disease, age, stroke) %>%
+  mutate(across(everything(), as.numeric))  # Convert to numeric if needed
+
+# Compute correlation matrix
+cor_matrix <- cor(data_numeric, use = "complete.obs")
+
+# Create heatmap with correct method
+ggcorrplot(cor_matrix, method = "square", type = "lower",  
+           lab = TRUE, lab_size = 4, colors = c("blue", "white", "red")) +
+  labs(title = "Correlation Heatmap of Stroke Risk Factors")
+```
+
+Model development
+Encoding
+```{r}
+categorical_vars <- names(data_clean)[sapply(data_clean, is.character)]
+print(categorical_vars)
+```
+```{r}
+data_clean <- data_clean %>%
+  mutate(across(all_of(categorical_vars), ~ as.numeric(factor(.)) - 1))
+```
+```{r}
+head(data_clean)
+```
+```{r}
+data_clean <- data_clean %>% select(-id)
+
+```
+```{r}
+data_clean <- data_clean %>% select(-age_group)
+```
+
+```{r}
+# Apply Min-Max Scaling to numeric variables
+numeric_vars <- names(data_clean)[sapply(data_clean, is.numeric)]
+preProcess_min_max <- preProcess(data_clean[, numeric_vars], method = "range")
+data_clean_scaled <- predict(preProcess_min_max, data_clean)
+
+# Split data (70% train, 30% test)
+set.seed(42)
+trainIndex <- createDataPartition(data_clean_scaled$stroke, p = 0.7, list = FALSE)
+train_data <- data_clean_scaled[trainIndex, ]
+test_data <- data_clean_scaled[-trainIndex, ]
+
+# Convert stroke variable to factor
+train_data$stroke <- factor(ifelse(train_data$stroke == 1, "Yes", "No"))
+test_data$stroke <- factor(ifelse(test_data$stroke == 1, "Yes", "No"), levels = levels(train_data$stroke))
+
+
+```
+
+
+```{r}
+### **Random Forest Model**
+rf_model <- randomForest(stroke ~ ., data = train_data, ntree = 100, mtry = 3, importance = TRUE)
+
+# Predictions
+rf_predictions <- predict(rf_model, test_data)
+rf_predictions <- factor(rf_predictions, levels = levels(test_data$stroke))
+
+# Confusion Matrix
+rf_conf_matrix <- confusionMatrix(rf_predictions, test_data$stroke)
+print(rf_conf_matrix)
+
+# Extract performance metrics
+rf_accuracy <- rf_conf_matrix$overall["Accuracy"]
+rf_precision <- rf_conf_matrix$byClass["Precision"]
+rf_recall <- rf_conf_matrix$byClass["Recall"]
+rf_f1 <- 2 * (rf_precision * rf_recall) / (rf_precision + rf_recall)
+
+cat("\nRandom Forest Performance Metrics:\n")
+cat("Accuracy:", round(rf_accuracy, 4), "\n")
+cat("Precision:", round(rf_precision, 4), "\n")
+cat("Recall:", round(rf_recall, 4), "\n")
+cat("F1 Score:", round(rf_f1, 4), "\n")
+
+# Plot Confusion Matrix for Random Forest
+rf_cm_table <- as.data.frame(rf_conf_matrix$table)
+
+ggplot(rf_cm_table, aes(Prediction, Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "black", size = 6) +  # Changed text color to black for better contrast
+  scale_fill_gradient2(low = "lightblue", mid = "white", high = "royalblue", midpoint = median(rf_cm_table$Freq)) +  # Contrasting color scale
+  ggtitle("Random Forest Confusion Matrix") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+### **Logistic Regression Model**
+log_model <- glm(stroke ~ ., data = train_data, family = binomial)
+
+# Predictions
+log_predictions_prob <- predict(log_model, test_data, type = "response")
+log_predictions <- ifelse(log_predictions_prob > 0.5, "Yes", "No")
+log_predictions <- factor(log_predictions, levels = levels(test_data$stroke))
+
+# Confusion Matrix
+log_conf_matrix <- confusionMatrix(log_predictions, test_data$stroke)
+print(log_conf_matrix)
+
+# Extract performance metrics
+log_accuracy <- log_conf_matrix$overall["Accuracy"]
+log_precision <- log_conf_matrix$byClass["Precision"]
+log_recall <- log_conf_matrix$byClass["Recall"]
+log_f1 <- 2 * (log_precision * log_recall) / (log_precision + log_recall)
+
+cat("\nLogistic Regression Performance Metrics:\n")
+cat("Accuracy:", round(log_accuracy, 4), "\n")
+cat("Precision:", round(log_precision, 4), "\n")
+cat("Recall:", round(log_recall, 4), "\n")
+cat("F1 Score:", round(log_f1, 4), "\n")
+
+# Plot Confusion Matrix for Logistic Regression
+log_cm_table <- as.data.frame(log_conf_matrix$table)
+
+ggplot(log_cm_table, aes(Prediction, Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "black", size = 6) + 
+  scale_fill_gradient2(low = "lightblue", mid = "white", high = "red", midpoint = median(log_cm_table$Freq)) + 
+  ggtitle("Logistic Regression Confusion Matrix") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+
+### **Decision Tree Model**
+dt_model <- rpart(stroke ~ ., data = train_data, method = "class")
+
+# Predictions
+dt_predictions <- predict(dt_model, test_data, type = "class")
+dt_predictions <- factor(dt_predictions, levels = levels(test_data$stroke))
+
+# Confusion Matrix
+dt_conf_matrix <- confusionMatrix(dt_predictions, test_data$stroke)
+print(dt_conf_matrix)
+
+# Extract performance metrics
+dt_accuracy <- dt_conf_matrix$overall["Accuracy"]
+dt_precision <- dt_conf_matrix$byClass["Precision"]
+dt_recall <- dt_conf_matrix$byClass["Recall"]
+dt_f1 <- 2 * (dt_precision * dt_recall) / (dt_precision + dt_recall)
+
+cat("\nDecision Tree Performance Metrics:\n")
+cat("Accuracy:", round(dt_accuracy, 4), "\n")
+cat("Precision:", round(dt_precision, 4), "\n")
+cat("Recall:", round(dt_recall, 4), "\n")
+cat("F1 Score:", round(dt_f1, 4), "\n")
+
+# Plot Confusion Matrix for Decision Tree
+dt_cm_table <- as.data.frame(dt_conf_matrix$table)
+
+ggplot(dt_cm_table, aes(Prediction, Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "black", size = 6) + 
+  scale_fill_gradient2(low = "lightblue", mid = "white", high = "green", midpoint = median(dt_cm_table$Freq)) + 
+  ggtitle("Decision Tree Confusion Matrix") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+# **Comparing Model Performance**
+performance_metrics <- data.frame(
+  Model = c("Random Forest", "Logistic Regression", "Decision Tree"),
+  Accuracy = c(rf_accuracy, log_accuracy, dt_accuracy),
+  Precision = c(rf_precision, log_precision, dt_precision),
+  Recall = c(rf_recall, log_recall, dt_recall),
+  F1_Score = c(rf_f1, log_f1, dt_f1)
+)
+
+library(knitr)
+kable(performance_metrics, caption = "Model Performance Comparison Table", digits = 4)
+
+# Plot Model Comparison
+performance_metrics_long <- reshape2::melt(performance_metrics, id.vars = "Model")
+
+ggplot(performance_metrics_long, aes(x = Model, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  ggtitle("Model Performance Comparison") +
+  labs(y = "Score", fill = "Metric") +
+  theme_minimal()
+
+
+
+```
+
+
+
+
+
+
